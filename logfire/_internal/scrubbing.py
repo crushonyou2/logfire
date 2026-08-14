@@ -14,6 +14,8 @@ from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.trace import Event
 from opentelemetry.trace import Link
 
+from logfire.exceptions import LogfireConfigError
+
 from .constants import (
     ATTRIBUTES_CONFIG,
     ATTRIBUTES_JSON_SCHEMA_KEY,
@@ -210,8 +212,20 @@ class Scrubber(BaseScrubber):
 
     def __init__(self, patterns: Sequence[str] | None, callback: ScrubCallback | None = None):
         # See ScrubbingOptions for more info on these parameters.
-        patterns = [_DEFAULT_PATTERN, *(patterns or [])]
-        self._pattern = re.compile('|'.join(patterns), re.IGNORECASE | re.DOTALL)
+        if isinstance(patterns, str):
+            raise LogfireConfigError("Scrubbing patterns must be a sequence, e.g. ['password'], not a string.")
+
+        patterns = patterns or []
+        for pattern in patterns:
+            try:
+                compiled = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+            except re.error as e:
+                raise LogfireConfigError(f'Invalid scrubbing pattern {pattern!r}: {e}') from e
+            empty_match = compiled.match('') or compiled.match('a')  # `\b` only matches empty next to a word character.
+            if empty_match is not None and empty_match.end() == 0:
+                raise LogfireConfigError(f'Scrubbing pattern {pattern!r} matches the empty string.')
+
+        self._pattern = re.compile('|'.join([_DEFAULT_PATTERN, *patterns]), re.IGNORECASE | re.DOTALL)
         self._callback = callback
 
     def scrub_log(self, log: LogRecord) -> LogRecord:

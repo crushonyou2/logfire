@@ -15,6 +15,7 @@ from opentelemetry.trace.propagation import get_current_span
 
 import logfire
 from logfire._internal.scrubbing import DEFAULT_PATTERNS, NoopScrubber, Scrubber
+from logfire.exceptions import LogfireConfigError
 from logfire.testing import TestExporter, TestLogExporter
 
 DEFAULT_PATTERN_EXAMPLES = {
@@ -37,6 +38,28 @@ DEFAULT_PATTERN_EXAMPLES = {
     r'(?:\b|_)jwt(?:\b|_)': 'has jwt value',
     r'(?:\b|_)ssn(?:\b|_)': 'has ssn value',
 }
+
+
+def test_scrubber_rejects_string_pattern():
+    with pytest.raises(LogfireConfigError, match=r"\['password'\]"):
+        Scrubber('password')
+
+
+@pytest.mark.parametrize('pattern', ['', '[0-9]*', r'\b'])
+def test_scrubber_rejects_patterns_matching_empty_string(pattern: str):
+    with pytest.raises(LogfireConfigError, match='matches the empty string'):
+        Scrubber([pattern])
+
+
+def test_scrubber_reports_invalid_pattern_position():
+    with pytest.raises(LogfireConfigError, match='position 3'):
+        Scrubber(['foo('])
+
+
+def test_scrubber_accepts_valid_extra_pattern():
+    result, _ = Scrubber([r'my_secret_\d+']).scrub_value(('attributes', 'value'), 'value=my_secret_123')
+
+    assert result == "[Scrubbed due to 'my_secret_123']"
 
 
 def test_optimized_default_patterns_match_naive_pattern():
